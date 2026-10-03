@@ -1,0 +1,4 @@
+#!/bin/sh
+# The Lock Screen platter lives in MediaRemoteUI; restart it so the change applies now.
+killall -9 MediaRemoteUI 2>/dev/null || true
+exit 0
