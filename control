@@ -1,9 +1,9 @@
 Package: com.qn.lsnowplayingrepeat
 Name: LSNowPlayingRepeat
-Version: 1.0.0
+Version: 1.1.0
 Architecture: iphoneos-arm64e
-Description: Lock Screen Now Playing: the Favorite button becomes a Repeat button for Apple Music and YouTube Music (tap = Off/All/One, long-press = Favorite). Requires iOS 17.1 or later.
-Maintainer: nguyendat
-Author: nguyendat
+Description: Lock Screen and Control Center Now Playing: the Favorite button becomes a Repeat button for Apple Music and YouTube Music (tap = Off/All/One, long-press = Favorite). Requires iOS 17.1 or later.
+Maintainer: Qn
+Author: Qn
 Section: Tweaks
 Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 17.1)

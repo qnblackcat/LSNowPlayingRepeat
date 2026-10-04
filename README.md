@@ -1,11 +1,11 @@
 # LSNowPlayingRepeat
 
-Turns the Favorite (⭐) button on the Lock Screen Now Playing controls into a Repeat button.
+Turns the Favorite (⭐) button on the Lock Screen and Control Center Now Playing controls into a Repeat button.
 
 - **Tap**: cycle Repeat Off → All → One
 - **Long-press**: toggle Favorite (when the app supports it)
 
-Works with **Apple Music** and **YouTube Music**. Other apps, Control Center, the Dynamic Island and StandBy keep the stock controls.
+Works with **Apple Music** and **YouTube Music**. Other apps, the Dynamic Island and StandBy keep the stock controls.
 
 | Icon | Mode |
 |---|---|
@@ -26,8 +26,8 @@ Requires [Theos with roothide support](https://github.com/roothide/theos).
 make package
 ```
 
-The package is written to `packages/`. Installing or removing it restarts MediaRemoteUI, so no respring is needed.
+The package is written to `packages/`. Respring after installing or removing it so Control Center picks up the change (MediaRemoteUI is restarted automatically).
 
 ## How it works
 
-On iOS 17.1 the Lock Screen Now Playing platter is drawn by **MediaRemoteUI**, not SpringBoard, so the tweak only loads there. It builds a Repeat item next to Apple's Favorite item in `-[MRUTransportControls leadingItemFromResponse:]`, and returns it from `-leadingItem` only while the Lock Screen's transport controls view is configuring or handling a tap. The repeat change is sent with the player's own `repeatCommand`, the same path Siri uses.
+On iOS 17.1 the Lock Screen Now Playing platter is drawn by **MediaRemoteUI**, while Control Center's media module lives in **SpringBoard**; the tweak loads into both. It builds a Repeat item next to Apple's Favorite item in `-[MRUTransportControls leadingItemFromResponse:]`, and returns it from `-leadingItem` only while a Lock Screen or Control Center transport controls view is configuring or handling a tap. The repeat change is sent with the player's own `repeatCommand`, the same path Siri uses.

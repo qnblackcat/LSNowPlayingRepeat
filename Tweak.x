@@ -1,11 +1,12 @@
-// LSNowPlayingRepeat — iOS 17.1 Lock Screen Now Playing: the Favorite (⭐) button becomes a
-// Repeat button for Apple Music and YouTube Music. Tap cycles Off → All → One;
-// long-press toggles Favorite where the player offers it.
+// LSNowPlayingRepeat — iOS 17.1 Lock Screen and Control Center Now Playing: the Favorite
+// (⭐) button becomes a Repeat button for Apple Music and YouTube Music. Tap cycles
+// Off → All → One; long-press toggles Favorite where the player offers it.
 //
 // On 17.1.1 the Lock Screen platter is not drawn by SpringBoard: it lives in the
-// MediaRemoteUI app (MRULockscreenViewController), which reuses MediaControls'
-// MRUNowPlayingTransportControlsView. The tweak only loads there, so Control Center
-// and the Dynamic Island (SpringBoard) are never touched.
+// MediaRemoteUI app (MRULockscreenViewController). Control Center's module lives in
+// SpringBoard (MRUControlCenterViewController). Both reuse MediaControls'
+// MRUNowPlayingTransportControlsView; StandBy (MediaRemoteUI) and the Dynamic Island
+// (SpringBoard) keep the stock ⭐.
 //
 // How the leading button works on 17.1.1:
 //   -[MRUTransportControls leadingItemFromResponse:] builds the ⭐ item once per
@@ -14,7 +15,7 @@
 //   (visibility) and -didSelectLeadingButton: → leadingButtonHandler (tap) all read
 //   transportControls.leadingItem at call time.
 // So a Repeat item is built next to the ⭐ item, and -leadingItem returns it only while
-// one of those view methods runs for the Lock Screen instance.
+// one of those view methods runs for a Lock Screen or Control Center instance.
 
 %config(generator=internal)
 
@@ -94,13 +95,18 @@ static NSSet<NSString *> *LSRSupportedBundleIDs(void) {
 	return bundleIDs;
 }
 
-// MediaRemoteUI also hosts StandBy (Ambient) scenes; only the Lock Screen gets Repeat.
-static NSString *const kLSRAmbientMarker = @"Ambient";
+typedef NS_ENUM(NSInteger, LSRHost) {
+	LSRHostOther,
+	LSRHostMediaRemoteUI,
+	LSRHostSpringBoard,
+};
+
+static LSRHost gLSRHost;
 
 static const void *kLSRRepeatItemKey = &kLSRRepeatItemKey;
 
-// > 0 while a Lock Screen transport-controls method runs on this thread.
-static __thread NSInteger gLSRLockScreenScope;
+// > 0 while a Repeat-enabled transport-controls method runs on this thread.
+static __thread NSInteger gLSRRepeatScope;
 
 #pragma mark - Repeat item
 
@@ -149,23 +155,33 @@ static MRUTransportControlItem *LSRRepeatItemForResponse(MPCPlayerResponse *resp
 	}];
 }
 
-#pragma mark - Lock Screen scope
+#pragma mark - Repeat scope
 
-static BOOL LSRIsLockScreenView(UIView *view) {
+static BOOL LSRResponderChainContains(UIView *view, NSString *marker) {
 	for (UIResponder *responder = view; responder; responder = responder.nextResponder) {
-		if ([NSStringFromClass([responder class]) containsString:kLSRAmbientMarker]) return NO;
+		if ([NSStringFromClass([responder class]) containsString:marker]) return YES;
 	}
-	return YES;
+	return NO;
 }
 
-static BOOL LSREnterLockScreenScope(UIView *view) {
-	BOOL lockScreen = LSRIsLockScreenView(view);
-	if (lockScreen) gLSRLockScreenScope++;
-	return lockScreen;
+static BOOL LSRShouldUseRepeat(UIView *view) {
+	switch (gLSRHost) {
+		// Lock Screen; StandBy (MRUAmbient…) keeps ⭐.
+		case LSRHostMediaRemoteUI: return !LSRResponderChainContains(view, @"Ambient");
+		// Control Center (MRUControlCenter…); the Dynamic Island keeps ⭐.
+		case LSRHostSpringBoard: return LSRResponderChainContains(view, @"ControlCenter");
+		default: return NO;
+	}
 }
 
-static void LSRExitLockScreenScope(BOOL entered) {
-	if (entered) gLSRLockScreenScope--;
+static BOOL LSREnterRepeatScope(UIView *view) {
+	BOOL entered = LSRShouldUseRepeat(view);
+	if (entered) gLSRRepeatScope++;
+	return entered;
+}
+
+static void LSRExitRepeatScope(BOOL entered) {
+	if (entered) gLSRRepeatScope--;
 }
 
 #pragma mark - Long-press → Favorite
@@ -196,7 +212,7 @@ static void LSRInstallLongPress(MRUNowPlayingTransportControlsView *view) {
 }
 
 - (MRUTransportControlItem *)leadingItem {
-	if (gLSRLockScreenScope > 0) {
+	if (gLSRRepeatScope > 0) {
 		MRUTransportControlItem *repeatItem = objc_getAssociatedObject(self, kLSRRepeatItemKey);
 		if (repeatItem) return repeatItem;
 	}
@@ -217,34 +233,34 @@ static void LSRInstallLongPress(MRUNowPlayingTransportControlsView *view) {
 %hook MRUNowPlayingTransportControlsView
 
 - (void)configureLeadingButton {
-	BOOL lockScreen = LSREnterLockScreenScope(self);
+	BOOL repeat = LSREnterRepeatScope(self);
 	%orig;
-	LSRExitLockScreenScope(lockScreen);
-	if (lockScreen) LSRInstallLongPress(self);
+	LSRExitRepeatScope(repeat);
+	if (repeat) LSRInstallLongPress(self);
 }
 
 - (BOOL)showLeadingButton {
-	BOOL lockScreen = LSREnterLockScreenScope(self);
+	BOOL repeat = LSREnterRepeatScope(self);
 	BOOL show = %orig;
-	LSRExitLockScreenScope(lockScreen);
+	LSRExitRepeatScope(repeat);
 	return show;
 }
 
 - (void)updateVisibility {
-	BOOL lockScreen = LSREnterLockScreenScope(self);
+	BOOL repeat = LSREnterRepeatScope(self);
 	%orig;
-	LSRExitLockScreenScope(lockScreen);
+	LSRExitRepeatScope(repeat);
 }
 
 - (void)didSelectLeadingButton:(id)button {
-	BOOL lockScreen = LSREnterLockScreenScope(self);
+	BOOL repeat = LSREnterRepeatScope(self);
 	%orig;
-	LSRExitLockScreenScope(lockScreen);
+	LSRExitRepeatScope(repeat);
 }
 
 %new
 - (void)lsr_handleLongPress:(UILongPressGestureRecognizer *)recognizer {
-	if (recognizer.state != UIGestureRecognizerStateBegan || !LSRIsLockScreenView(self)) return;
+	if (recognizer.state != UIGestureRecognizerStateBegan || !LSRShouldUseRepeat(self)) return;
 
 	// Outside the scope, -leadingItem is the stock ⭐ item.
 	MRUTransportControlItem *favoriteItem = self.transportControls.leadingItem;
@@ -273,13 +289,22 @@ static void LSRInstallLongPress(MRUNowPlayingTransportControlsView *view) {
 #pragma mark - Init
 
 %ctor {
-	// The Lock Screen Favorite button this replaces first shipped in iOS 17.1.
+	// The Favorite button this replaces first shipped in iOS 17.1.
 	if (![[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 1, 0}]) return;
+
+	NSString *bundleID = [NSBundle mainBundle].bundleIdentifier;
+	if ([bundleID isEqualToString:@"com.apple.MediaRemoteUI"]) {
+		gLSRHost = LSRHostMediaRemoteUI;
+	} else if ([bundleID isEqualToString:@"com.apple.springboard"]) {
+		gLSRHost = LSRHostSpringBoard;
+	} else {
+		return;
+	}
 
 	dlopen("/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls", RTLD_LAZY);
 	dlopen("/System/Library/PrivateFrameworks/MediaPlaybackCore.framework/MediaPlaybackCore", RTLD_LAZY);
 
-	// Everything below was checked on 17.1.1; bail out instead of crashing MediaRemoteUI elsewhere.
+	// Everything below was checked on 17.1.1; bail out instead of crashing the host elsewhere.
 	NSArray<NSArray<NSString *> *> *required = @[
 		@[@"-", @"MRUTransportControls", @"leadingItemFromResponse:"],
 		@[@"-", @"MRUTransportControls", @"leadingItem"],
