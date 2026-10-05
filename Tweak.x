@@ -1,5 +1,5 @@
 // LSNowPlayingRepeat — iOS 17.1 Lock Screen and Control Center Now Playing: the Favorite
-// (⭐) button becomes a Repeat button for Apple Music and YouTube Music. Tap cycles
+// (⭐) button becomes a Repeat button for Apple Music, YouTube Music and Spotify. Tap cycles
 // Off → All → One; long-press toggles Favorite where the player offers it.
 //
 // On 17.1.1 the Lock Screen platter is not drawn by SpringBoard: it lives in the
@@ -90,7 +90,7 @@ static NSSet<NSString *> *LSRSupportedBundleIDs(void) {
 	static NSSet<NSString *> *bundleIDs;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		bundleIDs = [NSSet setWithObjects:@"com.apple.Music", @"com.google.ios.youtubemusic", nil];
+		bundleIDs = [NSSet setWithObjects:@"com.apple.Music", @"com.google.ios.youtubemusic", @"com.spotify.client", nil];
 	});
 	return bundleIDs;
 }

@@ -5,7 +5,7 @@ Turns the Favorite (⭐) button on the Lock Screen and Control Center Now Playin
 - **Tap**: cycle Repeat Off → All → One
 - **Long-press**: toggle Favorite (when the app supports it)
 
-Works with **Apple Music** and **YouTube Music**. Other apps, the Dynamic Island and StandBy keep the stock controls.
+Works with **Apple Music**, **YouTube Music** and **Spotify**. Other apps, the Dynamic Island and StandBy keep the stock controls.
 
 | Icon | Mode |
 |---|---|
