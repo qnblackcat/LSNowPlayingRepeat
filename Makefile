@@ -1,7 +1,4 @@
-# THEOS_DEVICE_IP = 192.168.1.15
-
 TARGET := iphone:clang:16.5:16.0
-THEOS_PACKAGE_SCHEME = roothide
 INSTALL_TARGET_PROCESSES = MediaRemoteUI SpringBoard
 ARCHS = arm64 arm64e
 FINALPACKAGE = 1
