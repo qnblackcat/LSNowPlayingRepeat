@@ -81,7 +81,19 @@
 - (void)didSelectRoutingButton:(id)button;
 @end
 
+@interface MRUTransportControls (LSNowPlayingRepeat)
+// The Repeat item built next to Apple's item for the current response.
+@property (nonatomic, strong) MRUTransportControlItem *lsr_repeatItem;
+@end
+
+@interface MRUTransportButton (LSNowPlayingRepeat)
+// Apple's last route glyph, restored when Repeat stops applying.
+@property (nonatomic, strong) MRUAsset *lsr_routeAsset;
+@end
+
 @interface MRUNowPlayingTransportControlsView (LSNowPlayingRepeat)
+// Cached LSRShouldUseRepeat result: 0 = unknown, 1 = yes, 2 = no. Reset in -didMoveToWindow.
+@property (nonatomic, assign) NSInteger lsr_useRepeat;
 - (void)lsr_handleFavoriteLongPress:(UILongPressGestureRecognizer *)recognizer;
 - (void)lsr_handleRoutingLongPress:(UILongPressGestureRecognizer *)recognizer;
 @end
@@ -111,9 +123,6 @@ typedef NS_ENUM(NSInteger, LSRHost) {
 };
 
 static LSRHost gLSRHost;
-
-static const void *kLSRRepeatItemKey = &kLSRRepeatItemKey;
-static const void *kLSRRouteAssetKey = &kLSRRouteAssetKey;
 
 // > 0 while a Repeat-enabled transport-controls method runs on this thread (Favorite path).
 static __thread NSInteger gLSRRepeatScope;
@@ -169,7 +178,7 @@ static MRUTransportControlItem *LSRRepeatItemForResponse(MPCPlayerResponse *resp
 }
 
 static MRUTransportControlItem *LSRRepeatItem(MRUTransportControls *controls) {
-	return controls ? objc_getAssociatedObject(controls, kLSRRepeatItemKey) : nil;
+	return controls.lsr_repeatItem;
 }
 
 #pragma mark - Where Repeat applies
@@ -181,7 +190,7 @@ static BOOL LSRResponderChainContains(UIView *view, NSString *marker) {
 	return NO;
 }
 
-static BOOL LSRShouldUseRepeat(UIView *view) {
+static BOOL LSRComputeShouldUseRepeat(UIView *view) {
 	switch (gLSRHost) {
 		// Lock Screen; StandBy (MRUAmbient…) keeps the stock button.
 		case LSRHostMediaRemoteUI: return !LSRResponderChainContains(view, @"Ambient");
@@ -189,6 +198,13 @@ static BOOL LSRShouldUseRepeat(UIView *view) {
 		case LSRHostSpringBoard: return LSRResponderChainContains(view, @"ControlCenter");
 		default: return NO;
 	}
+}
+
+// The answer only holds once the view is in its hierarchy, so it is cached only then.
+static BOOL LSRShouldUseRepeat(MRUNowPlayingTransportControlsView *view) {
+	if (!view.window) return LSRComputeShouldUseRepeat(view);
+	if (!view.lsr_useRepeat) view.lsr_useRepeat = LSRComputeShouldUseRepeat(view) ? 1 : 2;
+	return view.lsr_useRepeat == 1;
 }
 
 #pragma mark - Long press
@@ -217,10 +233,13 @@ static void LSRInstallLongPress(UIButton *button, id target, SEL action) {
 // change that leaves the stock items untouched would never update the button without this.
 - (BOOL)isEqual:(id)object {
 	if (!%orig) return NO;
-	NSString *mine = [objc_getAssociatedObject(self, kLSRRepeatItemKey) identifier];
-	NSString *theirs = [objc_getAssociatedObject(object, kLSRRepeatItemKey) identifier];
+	if (![object isKindOfClass:[self class]]) return YES;
+	NSString *mine = self.lsr_repeatItem.identifier;
+	NSString *theirs = ((MRUTransportControls *)object).lsr_repeatItem.identifier;
 	return mine == theirs || [mine isEqualToString:theirs];
 }
+
+%property (nonatomic, strong) MRUTransportControlItem *lsr_repeatItem;
 
 %end
 
@@ -237,7 +256,7 @@ static void LSRInstallLongPress(UIButton *button, id target, SEL action) {
 
 #pragma mark - Favorite path (iOS 17.1+)
 
-static BOOL LSREnterRepeatScope(UIView *view) {
+static BOOL LSREnterRepeatScope(MRUNowPlayingTransportControlsView *view) {
 	BOOL entered = LSRShouldUseRepeat(view);
 	if (entered) gLSRRepeatScope++;
 	return entered;
@@ -253,7 +272,7 @@ static void LSRExitRepeatScope(BOOL entered) {
 
 - (id)leadingItemFromResponse:(id)response {
 	id item = %orig;
-	objc_setAssociatedObject(self, kLSRRepeatItemKey, LSRRepeatItemForResponse(response), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	self.lsr_repeatItem = LSRRepeatItemForResponse(response);
 	return item;
 }
 
@@ -268,6 +287,13 @@ static void LSRExitRepeatScope(BOOL entered) {
 %end
 
 %hook MRUNowPlayingTransportControlsView
+
+%property (nonatomic, assign) NSInteger lsr_useRepeat;
+
+- (void)didMoveToWindow {
+	self.lsr_useRepeat = 0;
+	%orig;
+}
 
 - (void)configureLeadingButton {
 	BOOL repeat = LSREnterRepeatScope(self);
@@ -295,13 +321,12 @@ static void LSRExitRepeatScope(BOOL entered) {
 	LSRExitRepeatScope(repeat);
 }
 
-%new
+%new(v@:@)
 - (void)lsr_handleFavoriteLongPress:(UILongPressGestureRecognizer *)recognizer {
 	if (recognizer.state != UIGestureRecognizerStateBegan || !LSRShouldUseRepeat(self)) return;
 
 	// Outside the scope, -leadingItem is the stock ⭐ item.
 	MRUTransportControlItem *favoriteItem = self.transportControls.leadingItem;
-	NSLog(@"[LSNowPlayingRepeat] long press, favorite item=%@", favoriteItem.identifier);
 	if (![favoriteItem.identifier hasPrefix:@"favorite."] || !favoriteItem.mainAction) return;
 
 	if ([favoriteItem.identifier isEqualToString:@"favorite.Off"]) {
@@ -339,7 +364,7 @@ static MRUTransportControlItem *LSRRoutingRepeatItem(MRUNowPlayingTransportContr
 // otherwise Apple's last route glyph comes back.
 static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 	MRUTransportButton *button = view.routingButton;
-	MRUAsset *routeAsset = objc_getAssociatedObject(button, kLSRRouteAssetKey);
+	MRUAsset *routeAsset = button.lsr_routeAsset;
 	MRUTransportControlItem *repeatItem = LSRRoutingRepeatItem(view);
 	if (repeatItem || routeAsset) [button setAsset:repeatItem.asset ?: routeAsset animated:NO];
 	if (repeatItem) LSRInstallLongPress(button, view, @selector(lsr_handleRoutingLongPress:));
@@ -351,7 +376,7 @@ static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 
 - (id)initWithMPCResponse:(id)response {
 	self = %orig;
-	if (self) objc_setAssociatedObject(self, kLSRRepeatItemKey, LSRRepeatItemForResponse(response), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	if (self) self.lsr_repeatItem = LSRRepeatItemForResponse(response);
 	return self;
 }
 
@@ -359,13 +384,15 @@ static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 
 %hook MRUTransportButton
 
+%property (nonatomic, strong) MRUAsset *lsr_routeAsset;
+
 // Every route glyph change (AirPods, speaker, AirPlay…) lands here on 16.3.1.
 - (void)setAsset:(MRUAsset *)asset animated:(BOOL)animated {
 	MRUNowPlayingTransportControlsView *owner = LSRRoutingOwner(self);
 	if (owner) {
 		MRUTransportControlItem *repeatItem = LSRRoutingRepeatItem(owner);
 		if (asset && asset != repeatItem.asset && ![repeatItem.asset isEqual:asset]) {
-			objc_setAssociatedObject(self, kLSRRouteAssetKey, asset, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			self.lsr_routeAsset = asset;
 		}
 		if (repeatItem) asset = repeatItem.asset;
 	}
@@ -376,6 +403,8 @@ static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 
 %hook MRUNowPlayingTransportControlsView
 
+%property (nonatomic, assign) NSInteger lsr_useRepeat;
+
 - (void)setTransportControls:(MRUTransportControls *)controls {
 	%orig;
 	LSRRefreshRoutingGlyph(self);
@@ -384,6 +413,7 @@ static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 // Control Center's view gets its controls before it joins the Control Center hierarchy,
 // so the Repeat check only passes once it is on screen.
 - (void)didMoveToWindow {
+	self.lsr_useRepeat = 0;
 	%orig;
 	if (self.window) LSRRefreshRoutingGlyph(self);
 }
@@ -397,7 +427,7 @@ static void LSRRefreshRoutingGlyph(MRUNowPlayingTransportControlsView *view) {
 	%orig;
 }
 
-%new
+%new(v@:@)
 - (void)lsr_handleRoutingLongPress:(UILongPressGestureRecognizer *)recognizer {
 	if (recognizer.state != UIGestureRecognizerStateBegan || !LSRRoutingRepeatItem(self)) return;
 
@@ -445,6 +475,7 @@ static NSArray<NSString *> *LSRMissingMethods(NSArray<NSArray<NSString *> *> *re
 	// Checked on 16.3.1 and 17.1.1; bail out instead of crashing the host elsewhere.
 	NSMutableArray<NSArray<NSString *> *> *required = [@[
 		@[@"-", @"MRUTransportControls", @"isEqual:"],
+		@[@"-", @"MRUTransportButton", @"gestureRecognizerShouldBegin:"],
 		@[@"-", @"MRUTransportControlItem", @"initWithIdentifier:asset:mainAction:"],
 		@[@"+", @"MRUAsset", @"image:"],
 		@[@"-", @"MPCPlayerResponseTracklist", @"repeatCommand"],
@@ -463,7 +494,6 @@ static NSArray<NSString *> *LSRMissingMethods(NSArray<NSArray<NSString *> *> *re
 			@[@"-", @"MRUNowPlayingTransportControlsView", @"updateVisibility"],
 			@[@"-", @"MRUNowPlayingTransportControlsView", @"didSelectLeadingButton:"],
 			@[@"-", @"MRUNowPlayingTransportControlsView", @"leadingButton"],
-			@[@"-", @"MRUTransportButton", @"gestureRecognizerShouldBegin:"],
 		]];
 	} else {
 		[required addObjectsFromArray:@[
